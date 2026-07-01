@@ -6,16 +6,26 @@ A Django web application containerized with Docker and backed by PostgreSQL.
 
 - **Python** 3.12
 - **Django** 5.x
+- **Django Ninja** (REST API)
 - **PostgreSQL** 16
 - **Gunicorn** (production / Heroku)
 - **Docker Compose** (local development)
+- **LangChain** (RAG orchestration)
+- **Pinecone** (vector store, cloud-hosted)
+- **Ollama** (local LLM + embeddings)
 
 ## Project structure
 
 ```
 ChatBot/
 ├── config/                 # Django project settings and URL routing
+│   └── api.py              # Ninja API assembly (mounts app routers)
 ├── core/                   # Starter Django app
+│   ├── api.py              # Core REST routes (/api/ping)
+│   └── rag/                # LangChain + Pinecone helpers
+├── chat/                   # Chat app (conversations, messages)
+│   ├── api.py              # Chat REST routes (/api/chat/...)
+│   └── urls.py             # Chat Django URLConf
 ├── docker-compose.yml      # Local development (Postgres + runserver)
 ├── Dockerfile              # Image for local Compose and Heroku
 ├── heroku.yml              # Heroku Container stack manifest
@@ -41,6 +51,8 @@ cp .env.example .env
 ```
 
 At minimum, change `SECRET_KEY` to a unique random string before deploying.
+
+For RAG features, also set `PINECONE_API_KEY` and `PINECONE_INDEX_NAME` (see [RAG / Pinecone](#rag--pinecone)). Ollama runs as a Docker service — no API key needed locally.
 
 ### 2. Start the development stack
 
@@ -82,6 +94,15 @@ docker compose exec web python manage.py startapp myapp
 # Open a shell in the web container
 docker compose exec web bash
 
+# Create Pinecone index (first time only)
+docker compose exec web python manage.py ensure_pinecone_index
+
+# Pull Ollama models (first time only — downloads llama + embedding model)
+docker compose exec web python manage.py pull_ollama_models
+
+# Verify RAG pipeline (embed → upsert → search)
+docker compose exec web python manage.py rag_smoke_test
+
 # Stop containers
 docker compose down
 ```
@@ -96,6 +117,65 @@ Expected response:
 
 ```json
 {"status": "ok"}
+```
+
+### REST API
+
+REST endpoints are served by [Django Ninja](https://django-ninja.dev/) under `/api/`.
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/ping` | API health / metadata |
+| `GET /api/chat/` | Chat app status |
+| `GET /api/docs` | Interactive OpenAPI docs (Swagger UI) |
+| `GET /api/openapi.json` | OpenAPI schema |
+
+```bash
+curl http://localhost:8000/api/ping
+```
+
+## RAG / Pinecone + Ollama
+
+- **Pinecone** is a managed vector database (cloud-hosted, API key required).
+- **Ollama** runs locally in Docker and serves the LLM and embedding models.
+
+### One-time setup
+
+1. Create a [Pinecone](https://www.pinecone.io/) account and API key.
+2. Add to `.env`:
+
+   ```bash
+   PINECONE_API_KEY=your-pinecone-api-key
+   PINECONE_INDEX_NAME=chatbot-dev
+   ```
+
+3. Start the stack and pull models:
+
+   ```bash
+   docker compose up --build -d
+   docker compose exec web python manage.py pull_ollama_models
+   docker compose exec web python manage.py ensure_pinecone_index
+   ```
+
+4. Run the smoke test:
+
+   ```bash
+   docker compose exec web python manage.py rag_smoke_test
+   ```
+
+Default models: `nomic-embed-text` (768-dim embeddings) and `llama3.2` (chat). Override via `OLLAMA_EMBEDDING_MODEL`, `OLLAMA_LLM_MODEL`, and `EMBEDDING_DIMENSION` in `.env`. `EMBEDDING_DIMENSION` must match the Pinecone index.
+
+Ollama is also exposed on [http://localhost:11434](http://localhost:11434) if you want to use it outside Docker.
+
+### Heroku
+
+Pinecone works on Heroku with config vars only. Ollama is **not** suitable for Heroku dynos — use a hosted LLM API in production or run Ollama on a separate server and set `OLLAMA_BASE_URL` accordingly.
+
+```bash
+heroku config:set \
+  PINECONE_API_KEY="..." \
+  PINECONE_INDEX_NAME="chatbot-prod" \
+  -a your-app-name
 ```
 
 ## Deploy to Heroku (Docker)
@@ -164,6 +244,15 @@ heroku container:release web -a your-app-name
 | `POSTGRES_HOST` | Database host (local) | `db` |
 | `POSTGRES_PORT` | Database port (local) | `5432` |
 | `DATABASE_URL` | Database URL (Heroku, auto-set) | — |
+| `PINECONE_API_KEY` | Pinecone API key | — |
+| `PINECONE_INDEX_NAME` | Pinecone index name | `chatbot-dev` |
+| `PINECONE_NAMESPACE` | Pinecone namespace | `default` |
+| `PINECONE_CLOUD` | Serverless cloud provider | `aws` |
+| `PINECONE_REGION` | Serverless region | `us-east-1` |
+| `OLLAMA_BASE_URL` | Ollama API URL | `http://ollama:11434` |
+| `OLLAMA_LLM_MODEL` | Chat model | `llama3.2` |
+| `OLLAMA_EMBEDDING_MODEL` | Embedding model | `nomic-embed-text` |
+| `EMBEDDING_DIMENSION` | Vector dimension (must match index) | `768` |
 
 ## License
 
