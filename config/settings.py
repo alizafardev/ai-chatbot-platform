@@ -1,21 +1,26 @@
 import os
 from pathlib import Path
 
+import dj_database_url
 from dotenv import load_dotenv
 
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+def env_list(name: str, default: str = "") -> list[str]:
+    return [value.strip() for value in os.environ.get(name, default).split(",") if value.strip()]
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    return os.environ.get(name, str(default)).lower() in {"true", "1", "yes"}
+
+
 SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-dev-only-change-me")
-
-DEBUG = os.environ.get("DEBUG", "False").lower() in ("true", "1", "yes")
-
-ALLOWED_HOSTS = [
-    host.strip()
-    for host in os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
-    if host.strip()
-]
+DEBUG = env_bool("DEBUG")
+ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
+CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -29,6 +34,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -56,15 +62,20 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
+IS_HEROKU = "DATABASE_URL" in os.environ
+
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("POSTGRES_DB", "chatbot"),
-        "USER": os.environ.get("POSTGRES_USER", "chatbot"),
-        "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "chatbot"),
-        "HOST": os.environ.get("POSTGRES_HOST", "db"),
-        "PORT": os.environ.get("POSTGRES_PORT", "5432"),
-    }
+    "default": dj_database_url.config(
+        default=(
+            f"postgres://{os.environ.get('POSTGRES_USER', 'chatbot')}:"
+            f"{os.environ.get('POSTGRES_PASSWORD', 'chatbot')}@"
+            f"{os.environ.get('POSTGRES_HOST', 'db')}:"
+            f"{os.environ.get('POSTGRES_PORT', '5432')}/"
+            f"{os.environ.get('POSTGRES_DB', 'chatbot')}"
+        ),
+        conn_max_age=600,
+        ssl_require=IS_HEROKU,
+    )
 }
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -81,5 +92,19 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
+    },
+}
+
+if IS_HEROKU:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    if ".herokuapp.com" not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(".herokuapp.com")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
