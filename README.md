@@ -7,8 +7,8 @@ A Django web application containerized with Docker and backed by PostgreSQL.
 - **Python** 3.12
 - **Django** 5.x
 - **PostgreSQL** 16
-- **Gunicorn** (production)
-- **Docker Compose**
+- **Gunicorn** (production / Heroku)
+- **Docker Compose** (local development)
 
 ## Project structure
 
@@ -16,10 +16,10 @@ A Django web application containerized with Docker and backed by PostgreSQL.
 ChatBot/
 ├── config/                 # Django project settings and URL routing
 ├── core/                   # Starter Django app
-├── docker-compose.yml      # Development environment
-├── docker-compose.prod.yml # Production environment
-├── Dockerfile
-├── entrypoint.sh           # Runs migrations before the app starts
+├── docker-compose.yml      # Local development (Postgres + runserver)
+├── Dockerfile              # Image for local Compose and Heroku
+├── heroku.yml              # Heroku Container stack manifest
+├── entrypoint.sh           # Runs migrations before start (local only)
 ├── manage.py
 ├── requirements.txt
 └── .env.example            # Environment variable template
@@ -62,7 +62,7 @@ Then open the Django admin at [http://localhost:8000/admin/](http://localhost:80
 
 ## Development
 
-The development compose file mounts your local code into the container, so changes are picked up by Django's development server without rebuilding the image.
+The compose file mounts your local code into the container, so changes are picked up by Django's development server without rebuilding the image.
 
 ### Common commands
 
@@ -98,20 +98,57 @@ Expected response:
 {"status": "ok"}
 ```
 
-## Production
+## Deploy to Heroku (Docker)
 
-Use the production compose file, which runs Gunicorn instead of Django's development server:
+Production runs on [Heroku Container stack](https://devcenter.heroku.com/articles/build-docker-images-heroku). The same `Dockerfile` is used locally and on Heroku. `heroku.yml` defines the build, release (migrate + collectstatic), and run (Gunicorn) phases.
+
+### Prerequisites
+
+- [Heroku CLI](https://devcenter.heroku.com/articles/heroku-cli)
+- Logged in: `heroku login`
+- Git repo with a `main` branch
+
+### One-time setup
+
+Replace `your-app-name` with your Heroku app name:
 
 ```bash
-docker compose -f docker-compose.prod.yml up --build -d
+heroku create your-app-name
+heroku stack:set container -a your-app-name
+heroku addons:create heroku-postgresql:essential-0 -a your-app-name
+heroku config:set \
+  SECRET_KEY="your-random-secret-key" \
+  DEBUG=False \
+  ALLOWED_HOSTS="your-app-name.herokuapp.com,.herokuapp.com" \
+  CSRF_TRUSTED_ORIGINS="https://your-app-name.herokuapp.com" \
+  -a your-app-name
+heroku git:remote -a your-app-name
 ```
 
-Before deploying to production:
+`DATABASE_URL` is set automatically when Postgres is attached.
 
-1. Set `DEBUG=False` in `.env`
-2. Use a strong, unique `SECRET_KEY`
-3. Set `ALLOWED_HOSTS` to your domain(s)
-4. Use strong PostgreSQL credentials
+### Deploy
+
+```bash
+git push heroku main
+```
+
+Heroku builds the Docker image from `Dockerfile`, runs migrations and `collectstatic` in the release phase, then starts Gunicorn.
+
+### Verify
+
+```bash
+heroku open -a your-app-name
+curl https://your-app-name.herokuapp.com/health/
+```
+
+### Alternative: push image from local Docker
+
+```bash
+heroku container:login
+heroku container:push web -a your-app-name
+heroku container:release web -a your-app-name
+```
 
 ## Environment variables
 
@@ -120,11 +157,13 @@ Before deploying to production:
 | `SECRET_KEY` | Django secret key | — |
 | `DEBUG` | Enable debug mode | `True` |
 | `ALLOWED_HOSTS` | Comma-separated allowed hosts | `localhost,127.0.0.1,0.0.0.0` |
-| `POSTGRES_DB` | Database name | `chatbot` |
-| `POSTGRES_USER` | Database user | `chatbot` |
-| `POSTGRES_PASSWORD` | Database password | `chatbot` |
-| `POSTGRES_HOST` | Database host | `db` |
-| `POSTGRES_PORT` | Database port | `5432` |
+| `CSRF_TRUSTED_ORIGINS` | Comma-separated trusted origins | — |
+| `POSTGRES_DB` | Database name (local) | `chatbot` |
+| `POSTGRES_USER` | Database user (local) | `chatbot` |
+| `POSTGRES_PASSWORD` | Database password (local) | `chatbot` |
+| `POSTGRES_HOST` | Database host (local) | `db` |
+| `POSTGRES_PORT` | Database port (local) | `5432` |
+| `DATABASE_URL` | Database URL (Heroku, auto-set) | — |
 
 ## License
 
