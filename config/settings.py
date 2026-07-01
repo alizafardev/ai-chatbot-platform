@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "core",
+    "chat",
 ]
 
 MIDDLEWARE = [
@@ -108,3 +109,15 @@ if IS_HEROKU:
         ALLOWED_HOSTS.append(".herokuapp.com")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# RAG — Pinecone + LangChain
+PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY", "")
+PINECONE_INDEX_NAME = os.environ.get("PINECONE_INDEX_NAME", "chatbot-dev")
+PINECONE_NAMESPACE = os.environ.get("PINECONE_NAMESPACE", "default")
+PINECONE_CLOUD = os.environ.get("PINECONE_CLOUD", "aws")
+PINECONE_REGION = os.environ.get("PINECONE_REGION", "us-east-1")
+
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434")
+OLLAMA_LLM_MODEL = os.environ.get("OLLAMA_LLM_MODEL", "llama3.2")
+OLLAMA_EMBEDDING_MODEL = os.environ.get("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
+EMBEDDING_DIMENSION = int(os.environ.get("EMBEDDING_DIMENSION", "768"))
