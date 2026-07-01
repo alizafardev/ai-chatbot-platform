@@ -8,3 +8,13 @@ class HelloRequest(Schema):
 class HelloResponse(Schema):
     question: str
     answer: str
+
+
+class RagRequest(Schema):
+    question: str
+
+
+class RagResponse(Schema):
+    question: str
+    answer: str
+    sources: list[str]
