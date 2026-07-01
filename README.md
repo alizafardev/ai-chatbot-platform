@@ -1,6 +1,6 @@
 # ChatBot
 
-A Django web application containerized with Docker and backed by PostgreSQL.
+A Django web application containerized with Docker and backed by PostgreSQL, with LangChain chat and RAG APIs.
 
 ## Tech stack
 
@@ -10,49 +10,56 @@ A Django web application containerized with Docker and backed by PostgreSQL.
 - **PostgreSQL** 16
 - **Gunicorn** (production / Heroku)
 - **Docker Compose** (local development)
-- **LangChain** (RAG orchestration)
+- **LangChain** (LLM orchestration)
 - **Pinecone** (vector store, cloud-hosted)
 - **Ollama** (local LLM + embeddings)
+- **OpenRouter** (production LLM + embeddings on Heroku)
 
 ## Project structure
 
 ```
 ChatBot/
-├── config/                 # Django project settings and URL routing
-│   └── api.py              # Ninja API assembly (mounts app routers)
-├── core/                   # Starter Django app
-│   ├── api.py              # Core REST routes (/api/ping)
+├── config/
+│   ├── api.py              # Ninja API assembly (mounts app routers)
+│   └── settings.py
+├── core/
+│   ├── api.py              # Core REST routes (/api/ping/)
 │   └── rag/                # LangChain + Pinecone helpers
-├── chat/                   # Chat app (conversations, messages)
-│   ├── api.py              # Chat REST routes (/api/chat/...)
-│   └── urls.py             # Chat Django URLConf
-├── docker-compose.yml      # Local development (Postgres + runserver)
-├── Dockerfile              # Image for local Compose and Heroku
-├── heroku.yml              # Heroku Container stack manifest
-├── entrypoint.sh           # Runs migrations before start (local only)
+├── chat/
+│   ├── api.py              # Chat REST routes
+│   ├── schemas.py          # Request/response schemas
+│   ├── service.py          # ChatService (hello + RAG)
+│   └── urls.py
+├── docker-compose.yml
+├── Dockerfile
+├── heroku.yml
+├── entrypoint.sh
 ├── manage.py
-├── requirements.txt
-└── .env.example            # Environment variable template
+└── requirements.txt
 ```
 
 ## Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/)
 - [Docker Compose](https://docs.docker.com/compose/install/)
+- [Pinecone](https://www.pinecone.io/) account (for RAG)
+- [Heroku CLI](https://devcenter.heroku.com/articles/heroku-cli) (for production deploy)
 
-## Getting started
+## Getting started (local)
 
 ### 1. Configure environment variables
-
-Copy the example env file and update values as needed:
 
 ```bash
 cp .env.example .env
 ```
 
-At minimum, change `SECRET_KEY` to a unique random string before deploying.
+Edit `.env` with your values. At minimum set `SECRET_KEY`. For RAG, also set `PINECONE_API_KEY` and `PINECONE_INDEX_NAME`.
 
-For RAG features, also set `PINECONE_API_KEY` and `PINECONE_INDEX_NAME` (see [RAG / Pinecone](#rag--pinecone)). Ollama runs as a Docker service — no API key needed locally.
+After changing `.env`, recreate the web container so Docker picks up new vars:
+
+```bash
+docker compose up -d --force-recreate web
+```
 
 ### 2. Start the development stack
 
@@ -62,150 +69,108 @@ docker compose up --build
 
 The app will be available at [http://localhost:8000](http://localhost:8000).
 
-On startup, the web container automatically runs database migrations.
+### 3. Bootstrap Pinecone + Ollama (first time)
 
-### 3. Create a superuser (optional)
+```bash
+docker compose exec web python manage.py pull_ollama_models
+docker compose exec web python manage.py ensure_pinecone_index
+docker compose exec web python manage.py rag_smoke_test
+```
+
+### 4. Create a superuser (optional)
 
 ```bash
 docker compose exec web python manage.py createsuperuser
 ```
 
-Then open the Django admin at [http://localhost:8000/admin/](http://localhost:8000/admin/).
+## REST API
 
-## Development
+Endpoints are served by [Django Ninja](https://django-ninja.dev/) under `/api/`. Routes use **trailing slashes** (Django convention).
 
-The compose file mounts your local code into the container, so changes are picked up by Django's development server without rebuilding the image.
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health/` | Django health check |
+| `GET` | `/api/ping/` | API health / metadata |
+| `POST` | `/api/chat/hello/` | LangChain + LLM (Ollama locally, OpenRouter on Heroku) |
+| `POST` | `/api/chat/rag/` | RAG: Pinecone retrieval + LLM answer |
+| `GET` | `/api/docs` | Swagger UI |
+| `GET` | `/api/openapi.json` | OpenAPI schema |
 
-### Common commands
-
-```bash
-# Run in the background
-docker compose up -d
-
-# View logs
-docker compose logs -f web
-
-# Run migrations manually
-docker compose exec web python manage.py migrate
-
-# Create a new Django app
-docker compose exec web python manage.py startapp myapp
-
-# Open a shell in the web container
-docker compose exec web bash
-
-# Create Pinecone index (first time only)
-docker compose exec web python manage.py ensure_pinecone_index
-
-# Pull Ollama models (first time only — downloads llama + embedding model)
-docker compose exec web python manage.py pull_ollama_models
-
-# Verify RAG pipeline (embed → upsert → search)
-docker compose exec web python manage.py rag_smoke_test
-
-# Stop containers
-docker compose down
-```
-
-### Health check
+### Examples
 
 ```bash
+# Health
 curl http://localhost:8000/health/
+curl http://localhost:8000/api/ping/
+
+# LangChain hello (Ollama only)
+curl -X POST http://localhost:8000/api/chat/hello/ \
+  -H "Content-Type: application/json" \
+  -d '{"question": "what is the capital of canada?"}'
+
+# RAG (Pinecone + Ollama — requires seeded index)
+curl -X POST http://localhost:8000/api/chat/rag/ \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What vector database does the platform use?"}'
 ```
 
-Expected response:
+## RAG / Pinecone + Ollama (local)
 
-```json
-{"status": "ok"}
-```
+- **Pinecone** — cloud vector DB (API key required, no Docker service)
+- **Ollama** — runs in Docker Compose (`ollama` service)
 
-### REST API
-
-REST endpoints are served by [Django Ninja](https://django-ninja.dev/) under `/api/`.
-
-| Endpoint | Description |
-|---|---|
-| `GET /api/ping` | API health / metadata |
-| `GET /api/chat/` | Chat app status |
-| `GET /api/docs` | Interactive OpenAPI docs (Swagger UI) |
-| `GET /api/openapi.json` | OpenAPI schema |
+Add to `.env`:
 
 ```bash
-curl http://localhost:8000/api/ping
+PINECONE_API_KEY=your-pinecone-api-key
+PINECONE_INDEX_NAME=chatbot-dev
+OLLAMA_BASE_URL=http://ollama:11434
+OLLAMA_LLM_MODEL=llama3.2
+OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+EMBEDDING_DIMENSION=768
 ```
 
-## RAG / Pinecone + Ollama
+Default embedding model `nomic-embed-text` produces **768-dimensional** vectors. `EMBEDDING_DIMENSION` must match the Pinecone index.
 
-- **Pinecone** is a managed vector database (cloud-hosted, API key required).
-- **Ollama** runs locally in Docker and serves the LLM and embedding models.
-
-### One-time setup
-
-1. Create a [Pinecone](https://www.pinecone.io/) account and API key.
-2. Add to `.env`:
-
-   ```bash
-   PINECONE_API_KEY=your-pinecone-api-key
-   PINECONE_INDEX_NAME=chatbot-dev
-   ```
-
-3. Start the stack and pull models:
-
-   ```bash
-   docker compose up --build -d
-   docker compose exec web python manage.py pull_ollama_models
-   docker compose exec web python manage.py ensure_pinecone_index
-   ```
-
-4. Run the smoke test:
-
-   ```bash
-   docker compose exec web python manage.py rag_smoke_test
-   ```
-
-Default models: `nomic-embed-text` (768-dim embeddings) and `llama3.2` (chat). Override via `OLLAMA_EMBEDDING_MODEL`, `OLLAMA_LLM_MODEL`, and `EMBEDDING_DIMENSION` in `.env`. `EMBEDDING_DIMENSION` must match the Pinecone index.
-
-Ollama is also exposed on [http://localhost:11434](http://localhost:11434) if you want to use it outside Docker.
-
-### Heroku
-
-Pinecone works on Heroku with config vars only. Ollama is **not** suitable for Heroku dynos — use a hosted LLM API in production or run Ollama on a separate server and set `OLLAMA_BASE_URL` accordingly.
-
-```bash
-heroku config:set \
-  PINECONE_API_KEY="..." \
-  PINECONE_INDEX_NAME="chatbot-prod" \
-  -a your-app-name
-```
+`/api/chat/rag/` only **searches** Pinecone — it does not ingest. Seed knowledge first (`rag_smoke_test` or your own ingest flow).
 
 ## Deploy to Heroku (Docker)
 
-Production runs on [Heroku Container stack](https://devcenter.heroku.com/articles/build-docker-images-heroku). The same `Dockerfile` is used locally and on Heroku. `heroku.yml` defines the build, release (migrate + collectstatic), and run (Gunicorn) phases.
-
-### Prerequisites
-
-- [Heroku CLI](https://devcenter.heroku.com/articles/heroku-cli)
-- Logged in: `heroku login`
-- Git repo with a `main` branch
+Production uses [Heroku Container stack](https://devcenter.heroku.com/articles/build-docker-images-heroku). The same `Dockerfile` is used locally and on Heroku. `heroku.yml` defines build, release (migrate + collectstatic), and run (Gunicorn).
 
 ### One-time setup
 
 Replace `your-app-name` with your Heroku app name:
 
 ```bash
+heroku login
 heroku create your-app-name
 heroku stack:set container -a your-app-name
 heroku addons:create heroku-postgresql:essential-0 -a your-app-name
+
 heroku config:set \
   SECRET_KEY="your-random-secret-key" \
   DEBUG=False \
   ALLOWED_HOSTS="your-app-name.herokuapp.com,.herokuapp.com" \
   CSRF_TRUSTED_ORIGINS="https://your-app-name.herokuapp.com" \
+  PINECONE_API_KEY="your-pinecone-api-key" \
+  PINECONE_INDEX_NAME="chatbot-prod" \
+  OPENROUTER_API_KEY="your-openrouter-api-key" \
+  OPENROUTER_MODEL="~anthropic/claude-sonnet-latest" \
+  OPENROUTER_EMBEDDING_MODEL="openai/text-embedding-3-small" \
+  OPENROUTER_SITE_URL="https://your-app-name.herokuapp.com" \
+  OPENROUTER_SITE_NAME="AI Chatbot Platform" \
+  EMBEDDING_DIMENSION="1536" \
   -a your-app-name
+
 heroku git:remote -a your-app-name
 ```
 
 `DATABASE_URL` is set automatically when Postgres is attached.
+
+**Production uses [OpenRouter](https://openrouter.ai/)** for LLM and embeddings (detected via `IS_HEROKU` / `DATABASE_URL`). **Local dev uses Ollama** in Docker Compose.
+
+Use a **separate Pinecone index** for production (`chatbot-prod`, **1536** dimensions for OpenRouter embeddings) vs local dev (`chatbot-dev`, **768** for Ollama `nomic-embed-text`).
 
 ### Deploy
 
@@ -213,13 +178,40 @@ heroku git:remote -a your-app-name
 git push heroku main
 ```
 
-Heroku builds the Docker image from `Dockerfile`, runs migrations and `collectstatic` in the release phase, then starts Gunicorn.
+Or from a feature branch:
 
-### Verify
+```bash
+git push heroku ft/pinecone-langchain-rag:main
+```
+
+### Post-deploy bootstrap
+
+On Eco dynos, scale web down before one-off commands, then scale back up:
+
+```bash
+heroku ps:scale web=0 -a your-app-name
+heroku run python manage.py ensure_pinecone_index -a your-app-name
+heroku run python manage.py rag_smoke_test -a your-app-name
+heroku ps:scale web=1 -a your-app-name
+```
+
+`rag_smoke_test` on Heroku uses OpenRouter for embeddings (requires `OPENROUTER_API_KEY`).
+
+### Verify on Heroku
 
 ```bash
 heroku open -a your-app-name
+
 curl https://your-app-name.herokuapp.com/health/
+curl https://your-app-name.herokuapp.com/api/ping/
+
+curl -X POST https://your-app-name.herokuapp.com/api/chat/hello/ \
+  -H "Content-Type: application/json" \
+  -d '{"question": "what is the capital of canada?"}'
+
+curl -X POST https://your-app-name.herokuapp.com/api/chat/rag/ \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What vector database does the platform use?"}'
 ```
 
 ### Alternative: push image from local Docker
@@ -229,6 +221,17 @@ heroku container:login
 heroku container:push web -a your-app-name
 heroku container:release web -a your-app-name
 ```
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `404` on `/api/ping` | Missing trailing slash | Use `/api/ping/` |
+| `503` on `/api/chat/hello/` (local) | Ollama unreachable | `docker compose up` and `pull_ollama_models` |
+| `503` on `/api/chat/hello/` (Heroku) | OpenRouter misconfigured | Set `OPENROUTER_API_KEY` on Heroku |
+| `400` on `/api/chat/rag/` | Empty Pinecone index | Run `rag_smoke_test` (local or `heroku run`) to seed data |
+| `PINECONE_API_KEY is not set` | Env not loaded | Add key to `.env`, then `docker compose up -d --force-recreate web` |
+| Heroku env changes ignored | Container not recreated | Redeploy or `heroku restart` after `config:set` |
 
 ## Environment variables
 
@@ -251,8 +254,13 @@ heroku container:release web -a your-app-name
 | `PINECONE_REGION` | Serverless region | `us-east-1` |
 | `OLLAMA_BASE_URL` | Ollama API URL | `http://ollama:11434` |
 | `OLLAMA_LLM_MODEL` | Chat model | `llama3.2` |
-| `OLLAMA_EMBEDDING_MODEL` | Embedding model | `nomic-embed-text` |
-| `EMBEDDING_DIMENSION` | Vector dimension (must match index) | `768` |
+| `OLLAMA_EMBEDDING_MODEL` | Embedding model (local) | `nomic-embed-text` |
+| `EMBEDDING_DIMENSION` | Vector dimension (must match index) | `768` (local), `1536` (Heroku) |
+| `OPENROUTER_API_KEY` | OpenRouter API key (Heroku) | — |
+| `OPENROUTER_MODEL` | Chat model (Heroku) | `~anthropic/claude-sonnet-latest` |
+| `OPENROUTER_EMBEDDING_MODEL` | Embedding model (Heroku) | `openai/text-embedding-3-small` |
+| `OPENROUTER_SITE_URL` | HTTP-Referer header for OpenRouter | — |
+| `OPENROUTER_SITE_NAME` | X-OpenRouter-Title header | `AI Chatbot Platform` |
 
 ## License
 

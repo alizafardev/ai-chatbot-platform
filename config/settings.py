@@ -121,3 +121,12 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434")
 OLLAMA_LLM_MODEL = os.environ.get("OLLAMA_LLM_MODEL", "llama3.2")
 OLLAMA_EMBEDDING_MODEL = os.environ.get("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
 EMBEDDING_DIMENSION = int(os.environ.get("EMBEDDING_DIMENSION", "768"))
+
+# OpenRouter (production / Heroku — official Python SDK)
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "~anthropic/claude-sonnet-latest")
+OPENROUTER_EMBEDDING_MODEL = os.environ.get(
+    "OPENROUTER_EMBEDDING_MODEL", "openai/text-embedding-3-small"
+)
+OPENROUTER_SITE_URL = os.environ.get("OPENROUTER_SITE_URL", "")
+OPENROUTER_SITE_NAME = os.environ.get("OPENROUTER_SITE_NAME", "AI Chatbot Platform")
